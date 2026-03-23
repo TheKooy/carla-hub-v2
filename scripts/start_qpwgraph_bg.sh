@@ -3,7 +3,7 @@ set -euo pipefail
 
 LOG_DIR="$HOME/.local/state/carla-hub/logs"
 LOG_FILE="$LOG_DIR/qpwgraph.log"
-PATCHBAY_FILE="$HOME/Desktop/firstTestAudioSettings.qpwgraph"
+PATCHBAY_FILE="$HOME/.config/carla-hub/patchbays/main-audio-routing.qpwgraph"
 
 mkdir -p "$LOG_DIR"
 

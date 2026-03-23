@@ -1,6 +1,6 @@
 {
   "project_dir": "$HOME/.config/carla/projects",
-  "qpwgraph_patchbay": "$HOME/Desktop/firstTestAudioSettings.qpwgraph",
+  "qpwgraph_patchbay": "$HOME/.config/carla-hub/patchbays/main-audio-routing.qpwgraph",
   "log_dir": "$HOME/.local/state/carla-hub/logs",
   "pipewire_latency": "256/48000",
   "poll_ms": 1000,
@@ -15,12 +15,33 @@
     "micro"
   ],
   "projects": [
-    { "name": "ALL", "filename": "ALL.carxp" },
-    { "name": "GAME", "filename": "GAME.carxp" },
-    { "name": "CHAT", "filename": "CHAT.carxp" },
-    { "name": "MEDIA", "filename": "MEDIA.carxp" },
-    { "name": "MORE", "filename": "MORE.carxp" },
-    { "name": "MICRO", "filename": "MICRO.carxp" },
-    { "name": "RETOUR-MIC", "filename": "RETOUR-MIC.carxp" }
+    {
+      "name": "ALL",
+      "filename": "ALL.carxp"
+    },
+    {
+      "name": "GAME",
+      "filename": "GAME.carxp"
+    },
+    {
+      "name": "CHAT",
+      "filename": "CHAT.carxp"
+    },
+    {
+      "name": "MEDIA",
+      "filename": "MEDIA.carxp"
+    },
+    {
+      "name": "MORE",
+      "filename": "MORE.carxp"
+    },
+    {
+      "name": "MICRO",
+      "filename": "MICRO.carxp"
+    },
+    {
+      "name": "RETOUR-MIC",
+      "filename": "RETOUR-MIC.carxp"
+    }
   ]
 }
