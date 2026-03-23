@@ -1,0 +1,26 @@
+{
+  "project_dir": "$HOME/.config/carla/projects",
+  "qpwgraph_patchbay": "$HOME/Desktop/firstTestAudioSettings.qpwgraph",
+  "log_dir": "$HOME/.local/state/carla-hub/logs",
+  "pipewire_latency": "256/48000",
+  "poll_ms": 1000,
+  "easyeffects_wait_name": "easyeffects_source",
+  "sink_names": [
+    "all",
+    "game",
+    "media",
+    "chat",
+    "more",
+    "retour",
+    "micro"
+  ],
+  "projects": [
+    { "name": "ALL", "filename": "ALL.carxp" },
+    { "name": "GAME", "filename": "GAME.carxp" },
+    { "name": "CHAT", "filename": "CHAT.carxp" },
+    { "name": "MEDIA", "filename": "MEDIA.carxp" },
+    { "name": "MORE", "filename": "MORE.carxp" },
+    { "name": "MICRO", "filename": "MICRO.carxp" },
+    { "name": "RETOUR-MIC", "filename": "RETOUR-MIC.carxp" }
+  ]
+}
