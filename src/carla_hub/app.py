@@ -4,9 +4,9 @@ import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Set
 
-from PyQt5.QtCore import QLockFile, QTimer
+from PyQt5.QtCore import QLockFile, QTimer, Qt
 from PyQt5.QtWidgets import (
     QApplication,
     QFrame,
@@ -16,46 +16,56 @@ from PyQt5.QtWidgets import (
     QMessageBox,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
 
 from .config import AppConfig, ProjectConfig
-from .process_utils import find_carla_pids_for_project, kill_pids, run_detached
+from .process_utils import kill_pids, list_processes, run_detached
 
 
 STYLE = """
 QWidget {
     background: #12151b;
     color: #e7edf5;
-    font-size: 14px;
+    font-size: 13px;
 }
 #hubTitle {
-    font-size: 22px;
+    font-size: 20px;
     font-weight: 700;
 }
 QFrame#slotCard {
     background: #1b2230;
     border: 1px solid #2a3346;
-    border-radius: 14px;
+    border-radius: 12px;
 }
 QLabel#title {
-    font-size: 18px;
+    font-size: 16px;
     font-weight: 700;
 }
 QLabel#path {
     color: #aeb8c8;
-    font-size: 12px;
+    font-size: 11px;
+}
+QLabel#statusOk {
+    color: #9fe3a1;
+    font-weight: 600;
+}
+QLabel#statusWarn {
+    color: #ffd27a;
+    font-weight: 600;
 }
 QLabel#error {
     color: #ff8f8f;
-    min-height: 36px;
+    min-height: 18px;
 }
 QPushButton {
     background: #263248;
     border: 1px solid #31405d;
-    border-radius: 10px;
-    padding: 8px 10px;
+    border-radius: 8px;
+    padding: 6px 8px;
+    min-height: 28px;
 }
 QPushButton:hover {
     background: #30415f;
@@ -64,6 +74,8 @@ QPushButton:pressed {
     background: #1d2940;
 }
 """
+
+CARD_COLUMNS = 3
 
 
 def base_env(pipewire_latency: str) -> Dict[str, str]:
@@ -99,6 +111,19 @@ def list_sinks() -> List[str]:
 
 
 @dataclass
+class SlotRuntimeState:
+    bg_pids: List[int]
+    gui_pids: List[int]
+    project_exists: bool
+
+
+@dataclass
+class RuntimeSnapshot:
+    sinks: Set[str]
+    slot_states: Dict[str, SlotRuntimeState]
+
+
+@dataclass
 class CarlaSlot:
     cfg: AppConfig
     project_cfg: ProjectConfig
@@ -118,36 +143,44 @@ class CarlaSlot:
         safe_name = self.name.lower().replace(" ", "_").replace("-", "_")
         return self.cfg.log_dir / f"carla_{safe_name}.log"
 
+    @property
+    def project_label(self) -> str:
+        return self.project.name
+
     def project_exists(self) -> bool:
         return self.project.is_file()
 
     def bg_pids(self) -> List[int]:
-        return find_carla_pids_for_project(self.project, no_gui=True)
+        return self._find_pids(no_gui=True)
 
     def gui_pids(self) -> List[int]:
-        return find_carla_pids_for_project(self.project, no_gui=False)
+        return self._find_pids(no_gui=False)
 
-    def is_bg_running(self) -> bool:
-        return bool(self.bg_pids())
-
-    def is_gui_running(self) -> bool:
-        return bool(self.gui_pids())
-
-    def state_text(self) -> str:
-        if not self.project_exists():
-            return "Project missing"
-        if self.is_gui_running():
-            return "GUI open"
-        if self.is_bg_running():
-            return "Background"
-        return "Stopped"
+    def _find_pids(self, *, no_gui: bool | None) -> List[int]:
+        project_str = str(self.project)
+        result: List[int] = []
+        for pid, cmd in list_processes():
+            if "carla" not in cmd:
+                continue
+            if project_str not in cmd:
+                continue
+            if "carla_hub" in cmd:
+                continue
+            has_no_gui = "--no-gui" in cmd
+            if no_gui is True and has_no_gui:
+                result.append(pid)
+            elif no_gui is False and not has_no_gui:
+                result.append(pid)
+            elif no_gui is None:
+                result.append(pid)
+        return result
 
     def start_bg(self) -> bool:
         if not self.project_exists():
             self.last_error = f"Missing project: {self.project}"
             return False
 
-        if self.is_bg_running() or self.is_gui_running():
+        if self.bg_pids() or self.gui_pids():
             self.last_error = ""
             return True
 
@@ -196,34 +229,36 @@ class CarlaSlot:
         self.stop_all()
         return self.start_bg()
 
-    def maintain(self) -> None:
-        if self.reopen_bg_after_gui_close and not self.is_gui_running():
-            self.reopen_bg_after_gui_close = False
-            if not self.is_bg_running():
-                self.start_bg()
-
 
 class SlotCard(QFrame):
     def __init__(self, slot: CarlaSlot):
         super().__init__()
         self.slot = slot
         self.setObjectName("slotCard")
+        self.setMinimumWidth(220)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
         outer = QVBoxLayout(self)
+        outer.setContentsMargins(10, 10, 10, 10)
+        outer.setSpacing(6)
 
         title = QLabel(slot.name)
         title.setObjectName("title")
         outer.addWidget(title)
 
-        self.project_label = QLabel(str(slot.project))
-        self.project_label.setWordWrap(True)
+        self.project_label = QLabel(slot.project_label)
         self.project_label.setObjectName("path")
+        self.project_label.setWordWrap(False)
+        self.project_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         outer.addWidget(self.project_label)
 
         self.status = QLabel()
+        self.status.setObjectName("statusOk")
         outer.addWidget(self.status)
 
         self.pid = QLabel()
+        self.pid.setObjectName("path")
+        self.pid.setWordWrap(True)
         outer.addWidget(self.pid)
 
         self.error = QLabel()
@@ -232,6 +267,8 @@ class SlotCard(QFrame):
         outer.addWidget(self.error)
 
         btns = QHBoxLayout()
+        btns.setSpacing(6)
+
         self.btn_open = QPushButton("Open")
         self.btn_bg = QPushButton("BG")
         self.btn_restart = QPushButton("Restart")
@@ -248,53 +285,64 @@ class SlotCard(QFrame):
         self.btn_restart.clicked.connect(self.on_restart)
         self.btn_stop.clicked.connect(self.on_stop)
 
-        self.refresh()
-
     def on_open(self):
         ok = self.slot.open_gui()
-        self.refresh()
         if not ok:
             QMessageBox.warning(self, self.slot.name, self.slot.last_error or "Cannot open GUI.")
 
     def on_bg(self):
         self.slot.stop_gui()
         ok = self.slot.start_bg()
-        self.refresh()
         if not ok:
             QMessageBox.warning(self, self.slot.name, self.slot.last_error or "Cannot start background.")
 
     def on_restart(self):
         ok = self.slot.restart_bg()
-        self.refresh()
         if not ok:
             QMessageBox.warning(self, self.slot.name, self.slot.last_error or "Cannot restart.")
 
     def on_stop(self):
         self.slot.stop_all()
-        self.refresh()
 
-    def refresh(self):
-        self.slot.maintain()
+    def refresh_from_state(self, state: SlotRuntimeState):
+        if self.slot.reopen_bg_after_gui_close and not state.gui_pids:
+            self.slot.reopen_bg_after_gui_close = False
+            if not state.bg_pids and state.project_exists:
+                self.slot.start_bg()
 
-        self.status.setText(f"State: {self.slot.state_text()}")
+        if not state.project_exists:
+            status_text = "State: Project missing"
+            self.status.setObjectName("statusWarn")
+        elif state.gui_pids:
+            status_text = "State: GUI open"
+            self.status.setObjectName("statusWarn")
+        elif state.bg_pids:
+            status_text = "State: Background"
+            self.status.setObjectName("statusOk")
+        else:
+            status_text = "State: Stopped"
+            self.status.setObjectName("statusWarn")
 
-        bg = self.slot.bg_pids()
-        gui = self.slot.gui_pids()
+        self.style().unpolish(self.status)
+        self.style().polish(self.status)
+        self.status.setText(status_text)
 
         parts = []
-        if bg:
-            parts.append("BG " + ",".join(map(str, bg)))
-        if gui:
-            parts.append("GUI " + ",".join(map(str, gui)))
-
+        if state.bg_pids:
+            parts.append("BG " + ",".join(map(str, state.bg_pids)))
+        if state.gui_pids:
+            parts.append("GUI " + ",".join(map(str, state.gui_pids)))
         self.pid.setText("PID: " + (" | ".join(parts) if parts else "—"))
+
         self.error.setText(self.slot.last_error)
 
-        exists = self.slot.project_exists()
+        exists = state.project_exists
+        running = bool(state.bg_pids or state.gui_pids)
+
         self.btn_open.setEnabled(exists)
         self.btn_bg.setEnabled(exists)
         self.btn_restart.setEnabled(exists)
-        self.btn_stop.setEnabled(self.slot.is_bg_running() or self.slot.is_gui_running())
+        self.btn_stop.setEnabled(running)
 
 
 class CarlaHubWindow(QWidget):
@@ -302,28 +350,28 @@ class CarlaHubWindow(QWidget):
         super().__init__()
         self.cfg = cfg
         self.setWindowTitle("Carla Hub V2")
-        self.resize(1100, 760)
+        self.resize(1180, 760)
 
         self.slots = [CarlaSlot(cfg, p) for p in cfg.projects]
         self.cards: List[SlotCard] = []
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(16, 16, 16, 16)
-        root.setSpacing(12)
+        root.setContentsMargins(14, 14, 14, 14)
+        root.setSpacing(10)
 
-        title = QLabel("Carla Hub V2 — background engines + safe GUI editing")
+        title = QLabel("Carla Hub V2")
         title.setObjectName("hubTitle")
         root.addWidget(title)
 
         info = QLabel(
-            "Open = stop the background instance for one channel and open the real Carla GUI.\n"
-            "When the GUI closes, the background instance is restarted automatically.\n"
-            "BG = ensure background. Restart = restart one channel. Stop = stop one channel."
+            "Open = open real Carla GUI for one project. "
+            "BG = ensure background engine. Restart = restart one channel. Stop = stop one channel."
         )
         info.setWordWrap(True)
         root.addWidget(info)
 
         self.sink_status = QLabel()
+        self.sink_status.setObjectName("path")
         root.addWidget(self.sink_status)
 
         top = QHBoxLayout()
@@ -342,20 +390,25 @@ class CarlaHubWindow(QWidget):
         top.addWidget(self.btn_easyeffects)
         root.addLayout(top)
 
-        area = QScrollArea()
-        area.setWidgetResizable(True)
-        container = QWidget()
-        grid = QGridLayout(container)
-        grid.setSpacing(12)
+        self.area = QScrollArea()
+        self.area.setWidgetResizable(True)
+
+        self.container = QWidget()
+        self.grid = QGridLayout(self.container)
+        self.grid.setContentsMargins(0, 0, 0, 0)
+        self.grid.setSpacing(10)
 
         for idx, slot in enumerate(self.slots):
             card = SlotCard(slot)
             self.cards.append(card)
-            row, col = divmod(idx, 2)
-            grid.addWidget(card, row, col)
+            row, col = divmod(idx, CARD_COLUMNS)
+            self.grid.addWidget(card, row, col)
 
-        area.setWidget(container)
-        root.addWidget(area)
+        for col in range(CARD_COLUMNS):
+            self.grid.setColumnStretch(col, 1)
+
+        self.area.setWidget(self.container)
+        root.addWidget(self.area)
 
         self.btn_start_all.clicked.connect(self.start_all)
         self.btn_stop_all.clicked.connect(self.stop_all)
@@ -370,18 +423,51 @@ class CarlaHubWindow(QWidget):
 
         self.tick()
 
-    def refresh_sink_status(self):
-        actual = set(list_sinks())
-        missing = [name for name in self.cfg.sink_names if name not in actual]
+    def build_snapshot(self) -> RuntimeSnapshot:
+        processes = list_processes()
+        sink_names = set(list_sinks())
+
+        slot_states: Dict[str, SlotRuntimeState] = {}
+        for slot in self.slots:
+            project_str = str(slot.project)
+            bg_pids: List[int] = []
+            gui_pids: List[int] = []
+
+            for pid, cmd in processes:
+                if "carla" not in cmd:
+                    continue
+                if project_str not in cmd:
+                    continue
+                if "carla_hub" in cmd:
+                    continue
+
+                if "--no-gui" in cmd:
+                    bg_pids.append(pid)
+                else:
+                    gui_pids.append(pid)
+
+            slot_states[slot.name] = SlotRuntimeState(
+                bg_pids=bg_pids,
+                gui_pids=gui_pids,
+                project_exists=slot.project.is_file(),
+            )
+
+        return RuntimeSnapshot(sinks=sink_names, slot_states=slot_states)
+
+    def refresh_sink_status(self, sinks: Set[str]):
+        missing = [name for name in self.cfg.sink_names if name not in sinks]
         if missing:
             self.sink_status.setText("Audio buses: missing -> " + ", ".join(missing))
         else:
             self.sink_status.setText("Audio buses: OK")
 
     def tick(self):
-        self.refresh_sink_status()
+        snapshot = self.build_snapshot()
+        self.refresh_sink_status(snapshot.sinks)
+
         for card in self.cards:
-            card.refresh()
+            state = snapshot.slot_states[card.slot.name]
+            card.refresh_from_state(state)
 
     def start_all(self):
         for slot in self.slots:
